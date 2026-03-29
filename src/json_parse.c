@@ -262,10 +262,13 @@ static AstNode *jp_parse_object(JsonParser *P) {
     jp_advance(P); /* consume { */
 
     AstNode *record = ast_new_record(start_line, start_col);
+    KeySet ks;
+    keyset_init(&ks, 16);
 
     jp_skip_ws(P);
     if (jp_peek(P) == '}') {
         jp_advance(P);
+        keyset_free(&ks);
         return record;
     }
 
@@ -274,12 +277,14 @@ static AstNode *jp_parse_object(JsonParser *P) {
         if (jp_peek(P) != '"') {
             mron_error(P->filename, P->line, P->col,
                        "expected string key in JSON object, got '%c'", jp_peek(P));
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
 
         AstNode *key_node = jp_parse_string(P);
         if (!key_node) {
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
@@ -291,6 +296,7 @@ static AstNode *jp_parse_object(JsonParser *P) {
             mron_error(P->filename, P->line, P->col,
                        "expected ':' after key in JSON object");
             free(key);
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
@@ -300,20 +306,20 @@ static AstNode *jp_parse_object(JsonParser *P) {
         AstNode *value = jp_parse_value(P);
         if (!value) {
             free(key);
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
 
         /* Check for duplicate keys */
-        for (size_t i = 0; i < record->data.record.count; i++) {
-            if (strcmp(record->data.record.pairs[i].key, key) == 0) {
-                mron_error(P->filename, P->line, P->col,
-                           "duplicate key \"%s\" in JSON object", key);
-                ast_free(value);
-                free(key);
-                ast_free(record);
-                return NULL;
-            }
+        if (keyset_insert(&ks, key)) {
+            mron_error(P->filename, P->line, P->col,
+                       "duplicate key \"%s\" in JSON object", key);
+            ast_free(value);
+            free(key);
+            keyset_free(&ks);
+            ast_free(record);
+            return NULL;
         }
 
         ast_record_add(record, key, value);

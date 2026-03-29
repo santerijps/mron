@@ -31,10 +31,6 @@ static char lex_advance(LexerState *L) {
     return c;
 }
 
-static int is_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
 static int is_ident_start(char c) {
     return isalpha((unsigned char)c) || c == '_';
 }
@@ -49,9 +45,19 @@ static int is_number_char(char c) {
 
 static void skip_whitespace_and_comments(LexerState *L) {
     for (;;) {
-        /* Skip whitespace */
-        while (is_whitespace(lex_peek(L))) {
-            lex_advance(L);
+        /* Skip whitespace — batch non-newline characters */
+        for (;;) {
+            char c = L->source[L->pos];
+            if (c == ' ' || c == '\t' || c == '\r') {
+                L->pos++;
+                L->col++;
+            } else if (c == '\n') {
+                L->pos++;
+                L->line++;
+                L->col = 1;
+            } else {
+                break;
+            }
         }
 
         /* Check for comments */
@@ -109,6 +115,16 @@ static Token make_token(TokenType type, const char *value, int line, int col) {
     Token t;
     t.type = type;
     t.value = value ? mron_strdup(value) : NULL;
+    t.line = line;
+    t.col = col;
+    return t;
+}
+
+/* Like make_token but takes ownership of the string (caller must not free) */
+static Token make_token_own(TokenType type, char *value, int line, int col) {
+    Token t;
+    t.type = type;
+    t.value = value;
     t.line = line;
     t.col = col;
     return t;
@@ -176,34 +192,34 @@ static Token lex_string(LexerState *L) {
     }
 
     char *str = sb_finish(&sb);
-    Token tok = make_token(TOKEN_STRING, str, start_line, start_col);
-    free(str);
+    Token tok = make_token_own(TOKEN_STRING, str, start_line, start_col);
     return tok;
 }
 
 static Token lex_number(LexerState *L, int negative) {
     int start_line = L->line;
     int start_col = L->col;
-    StringBuilder raw;
-    sb_init(&raw);
+    size_t start_pos = L->pos;
 
     if (negative) {
         lex_advance(L); /* consume '-' */
-        sb_append_char(&raw, '-');
     }
 
     /* Read all valid number characters */
     while (isdigit((unsigned char)lex_peek(L)) || is_number_char(lex_peek(L))) {
-        sb_append_char(&raw, lex_peek(L));
         lex_advance(L);
     }
 
-    char *raw_str = sb_finish(&raw);
+    /* Extract raw string from source */
+    size_t raw_len = L->pos - start_pos;
+    const char *raw_start = L->source + start_pos;
 
     /* Validate: must end with a digit */
-    size_t raw_len = strlen(raw_str);
     size_t check_start = negative ? 1 : 0;
-    if (raw_len <= check_start || !isdigit((unsigned char)raw_str[raw_len - 1])) {
+    if (raw_len <= check_start || !isdigit((unsigned char)raw_start[raw_len - 1])) {
+        char *raw_str = malloc(raw_len + 1);
+        memcpy(raw_str, raw_start, raw_len);
+        raw_str[raw_len] = '\0';
         mron_error(L->filename, start_line, start_col, "number must end with a digit: '%s'", raw_str);
         free(raw_str);
         return make_token(TOKEN_ERROR, "invalid number", start_line, start_col);
@@ -212,46 +228,58 @@ static Token lex_number(LexerState *L, int negative) {
     /* Validate: at most one period */
     int period_count = 0;
     for (size_t i = check_start; i < raw_len; i++) {
-        if (raw_str[i] == '.') period_count++;
+        if (raw_start[i] == '.') period_count++;
     }
     if (period_count > 1) {
+        char *raw_str = malloc(raw_len + 1);
+        memcpy(raw_str, raw_start, raw_len);
+        raw_str[raw_len] = '\0';
         mron_error(L->filename, start_line, start_col,
                    "number has more than one decimal point: '%s'", raw_str);
         free(raw_str);
         return make_token(TOKEN_ERROR, "invalid number", start_line, start_col);
     }
 
-    /* Clean number: strip underscores and commas */
-    StringBuilder clean;
-    sb_init(&clean);
+    /* Check if cleaning is needed (underscores or commas present) */
+    int needs_clean = 0;
     for (size_t i = 0; i < raw_len; i++) {
-        if (raw_str[i] != '_' && raw_str[i] != ',') {
-            sb_append_char(&clean, raw_str[i]);
-        }
+        if (raw_start[i] == '_' || raw_start[i] == ',') { needs_clean = 1; break; }
     }
-    free(raw_str);
 
-    char *clean_str = sb_finish(&clean);
-    Token tok = make_token(TOKEN_NUMBER, clean_str, start_line, start_col);
-    free(clean_str);
-    return tok;
+    char *clean_str;
+    if (needs_clean) {
+        clean_str = malloc(raw_len + 1);
+        size_t j = 0;
+        for (size_t i = 0; i < raw_len; i++) {
+            if (raw_start[i] != '_' && raw_start[i] != ',') {
+                clean_str[j++] = raw_start[i];
+            }
+        }
+        clean_str[j] = '\0';
+    } else {
+        clean_str = malloc(raw_len + 1);
+        memcpy(clean_str, raw_start, raw_len);
+        clean_str[raw_len] = '\0';
+    }
+
+    return make_token_own(TOKEN_NUMBER, clean_str, start_line, start_col);
 }
 
 static Token lex_ident(LexerState *L) {
     int start_line = L->line;
     int start_col = L->col;
-    StringBuilder sb;
-    sb_init(&sb);
+    size_t start_pos = L->pos;
 
     while (is_ident_char(lex_peek(L))) {
-        sb_append_char(&sb, lex_peek(L));
         lex_advance(L);
     }
 
-    char *str = sb_finish(&sb);
-    Token tok = make_token(TOKEN_IDENT, str, start_line, start_col);
-    free(str);
-    return tok;
+    size_t len = L->pos - start_pos;
+    char *str = malloc(len + 1);
+    if (!str) { fprintf(stderr, "error: out of memory\n"); exit(1); }
+    memcpy(str, L->source + start_pos, len);
+    str[len] = '\0';
+    return make_token_own(TOKEN_IDENT, str, start_line, start_col);
 }
 
 TokenArray *lexer_tokenize(const char *source, const char *filename) {

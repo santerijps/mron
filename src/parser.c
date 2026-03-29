@@ -94,16 +94,20 @@ static AstNode *parse_csv_list(Parser *P) {
     }
 
     /* Check for duplicate header keys */
-    for (size_t i = 0; i < header_count; i++) {
-        for (size_t j = i + 1; j < header_count; j++) {
-            if (strcmp(headers[i], headers[j]) == 0) {
+    {
+        KeySet hks;
+        keyset_init(&hks, header_count < 16 ? 16 : header_count);
+        for (size_t i = 0; i < header_count; i++) {
+            if (keyset_insert(&hks, headers[i])) {
                 mron_error(P->tokens->filename, open_paren->line, open_paren->col,
                            "duplicate key '%s' in CSV-style header", headers[i]);
+                keyset_free(&hks);
                 for (size_t k = 0; k < header_count; k++) free(headers[k]);
                 free(headers);
                 return NULL;
             }
         }
+        keyset_free(&hks);
     }
 
     if (header_count == 0) {
@@ -274,6 +278,8 @@ static AstNode *parse_value(Parser *P) {
    Returns a record node containing all pairs. */
 static AstNode *parse_record_body(Parser *P, TokenType end_token) {
     AstNode *record = ast_new_record(peek(P)->line, peek(P)->col);
+    KeySet ks;
+    keyset_init(&ks, 16);
 
     while (!check(P, end_token) && !check(P, TOKEN_EOF)) {
         /* Expect a key (identifier) */
@@ -282,6 +288,7 @@ static AstNode *parse_record_body(Parser *P, TokenType end_token) {
             mron_error(P->tokens->filename, key_tok->line, key_tok->col,
                        "expected a key (identifier), got %s",
                        token_type_name(key_tok->type));
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
@@ -297,24 +304,25 @@ static AstNode *parse_record_body(Parser *P, TokenType end_token) {
         }
 
         if (!value) {
+            keyset_free(&ks);
             ast_free(record);
             return NULL;
         }
 
         /* Check for duplicate keys */
-        for (size_t i = 0; i < record->data.record.count; i++) {
-            if (strcmp(record->data.record.pairs[i].key, key) == 0) {
-                mron_error(P->tokens->filename, key_tok->line, key_tok->col,
-                           "duplicate key '%s'", key);
-                ast_free(value);
-                ast_free(record);
-                return NULL;
-            }
+        if (keyset_insert(&ks, key)) {
+            mron_error(P->tokens->filename, key_tok->line, key_tok->col,
+                       "duplicate key '%s'", key);
+            ast_free(value);
+            keyset_free(&ks);
+            ast_free(record);
+            return NULL;
         }
 
         ast_record_add(record, key, value);
     }
 
+    keyset_free(&ks);
     return record;
 }
 
