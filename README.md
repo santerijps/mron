@@ -262,7 +262,7 @@ All whitespace (spaces, tabs, newlines) is treated uniformly as a delimiter. Ind
 
 ## VS Code extension
 
-A syntax highlighting extension for `.mron` files is included in the [`mron-syntax-highlight-vscode/`](mron-syntax-highlight-vscode/) directory.
+A syntax highlighting extension for `.mron` files is included in the [`mron-syntax-highlight-vscode/`](mron-vscode//) directory.
 
 ## License
 
