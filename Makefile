@@ -10,14 +10,13 @@ TARGET = mronc
 
 ifeq ($(OS),Windows_NT)
     TARGET := $(TARGET).exe
-    RM = del /Q
     RMDIR = rmdir /S /Q
 else
     RM = rm -f
     RMDIR = rm -rf
 endif
 
-.PHONY: all clean test
+.PHONY: all clean test release
 
 all: $(TARGET)
 
@@ -27,8 +26,15 @@ $(TARGET): $(OBJ)
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+release: clean
+	$(MAKE) CFLAGS="-O3 -flto -DNDEBUG -s -Wall -Wextra -Wpedantic -std=c99 -Isrc -DMRON_VERSION='\"$(MRON_VERSION)\"'" LDFLAGS="-O3 -flto -s"
+
 clean:
+ifeq ($(OS),Windows_NT)
+	-del /Q $(subst /,\,$(OBJ)) $(TARGET) 2>nul
+else
 	$(RM) $(OBJ) $(TARGET)
+endif
 
 test: $(TARGET)
 ifeq ($(OS),Windows_NT)
