@@ -1,0 +1,9 @@
+# Empty structures
+
+empty_record    {}
+empty_list      []
+empty_string    ""
+nested_empty {
+    inner {}
+    items []
+}

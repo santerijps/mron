@@ -1,0 +1,39 @@
+CC      = gcc
+CFLAGS  = -Wall -Wextra -Wpedantic -std=c99 -Isrc
+LDFLAGS =
+
+SRC = src/util.c src/ast.c src/lexer.c src/parser.c \
+      src/json_emit.c src/mron_emit.c src/json_parse.c src/main.c
+OBJ = $(SRC:.c=.o)
+TARGET = mronc
+
+ifeq ($(OS),Windows_NT)
+    TARGET := $(TARGET).exe
+    RM = del /Q
+    RMDIR = rmdir /S /Q
+else
+    RM = rm -f
+    RMDIR = rm -rf
+endif
+
+.PHONY: all clean test
+
+all: $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	$(RM) $(OBJ) $(TARGET)
+
+test: $(TARGET)
+ifeq ($(OS),Windows_NT)
+	@echo Running tests...
+	@tests\run_tests.bat
+else
+	@echo "Running tests..."
+	@bash tests/run_tests.sh
+endif

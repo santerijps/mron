@@ -1,0 +1,14 @@
+# Test all value types
+
+str_val     "hello world"
+empty_str   ""
+escaped     "say \"hello\""
+int_val     42
+big_num     1_000_000
+decimal     3.14
+comma_num   1,500
+bool_true   true
+bool_yes    yes
+bool_false  false
+bool_no     no
+null_val    null

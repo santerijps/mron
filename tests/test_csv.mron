@@ -1,0 +1,12 @@
+# CSV-style list test
+
+friends (name age) [
+    "Bob" 26
+    "Charlie" 31
+]
+
+scores (player points level) [
+    "Alice" 100 5
+    "Bob" 200 8
+    "Charlie" 150 6
+]

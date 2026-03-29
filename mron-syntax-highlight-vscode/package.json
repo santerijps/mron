@@ -1,0 +1,39 @@
+{
+    "name": "mron",
+    "displayName": "MRON - Minimal Rich Object Notation",
+    "description": "Syntax highlighting for .mron files",
+    "version": "0.1.0",
+    "publisher": "mron",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "mron",
+                "aliases": [
+                    "MRON",
+                    "mron"
+                ],
+                "extensions": [
+                    ".mron"
+                ],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icon.png",
+                    "dark": "./icon.png"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "mron",
+                "scopeName": "source.mron",
+                "path": "./syntaxes/mron.tmLanguage.json"
+            }
+        ]
+    }
+}

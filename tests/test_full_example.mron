@@ -1,0 +1,23 @@
+# This is a single-line comment
+
+###
+This is a multi-line
+comment!
+###
+
+name        "Alice"
+age         25
+is-adult    yes
+
+address {
+    country "UK"
+    city    "London"
+    street  "123 Baker Street"
+}
+
+hobbies     [ "soccer" "violin" ]
+
+friends (name age) [
+    "Bob" 26
+    "Charlie" 31
+]

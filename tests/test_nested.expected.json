@@ -1,0 +1,1 @@
+{"server":{"host":"localhost","port":8080,"ssl":false,"cors":{"origins":["http://localhost:3000","https://example.com"],"methods":["GET","POST","PUT"]}},"databases":[{"name":"primary","host":"db1.example.com","port":5432},{"name":"replica","host":"db2.example.com","port":5432}]}

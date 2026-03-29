@@ -1,0 +1,1 @@
+{"name":"Alice","age":25,"is-adult":true,"address":{"country":"UK","city":"London","street":"123 Baker Street"},"hobbies":["soccer","violin"],"friends":[{"name":"Bob","age":26},{"name":"Charlie","age":31}]}

@@ -1,0 +1,154 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "MRON",
+    "scopeName": "source.mron",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#csv-header" },
+        { "include": "#key-value" },
+        { "include": "#value" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.block.mron",
+                    "begin": "###",
+                    "end": "###"
+                },
+                {
+                    "name": "comment.line.number-sign.mron",
+                    "match": "#.*$"
+                }
+            ]
+        },
+        "key-value": {
+            "patterns": [
+                {
+                    "comment": "Key followed by a CSV header and list",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_-]*)(?=\\s+\\()",
+                    "captures": {
+                        "1": { "name": "entity.name.tag.mron" }
+                    }
+                },
+                {
+                    "comment": "Key followed by a record or value",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_-]*)(?=\\s+[\"0-9{\\[tfyn]|\\s+-(\\d))",
+                    "captures": {
+                        "1": { "name": "entity.name.tag.mron" }
+                    }
+                },
+                {
+                    "comment": "Key followed by null",
+                    "match": "([a-zA-Z_][a-zA-Z0-9_-]*)(?=\\s+null\\b)",
+                    "captures": {
+                        "1": { "name": "entity.name.tag.mron" }
+                    }
+                }
+            ]
+        },
+        "csv-header": {
+            "begin": "\\(",
+            "end": "\\)",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.header.begin.mron" }
+            },
+            "endCaptures": {
+                "0": { "name": "punctuation.definition.header.end.mron" }
+            },
+            "name": "meta.csv-header.mron",
+            "patterns": [
+                {
+                    "name": "variable.parameter.header-key.mron",
+                    "match": "[a-zA-Z_][a-zA-Z0-9_-]*"
+                }
+            ]
+        },
+        "value": {
+            "patterns": [
+                { "include": "#string" },
+                { "include": "#number" },
+                { "include": "#boolean" },
+                { "include": "#null" },
+                { "include": "#record" },
+                { "include": "#list" }
+            ]
+        },
+        "string": {
+            "name": "string.quoted.double.mron",
+            "begin": "\"",
+            "end": "\"",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.string.begin.mron" }
+            },
+            "endCaptures": {
+                "0": { "name": "punctuation.definition.string.end.mron" }
+            },
+            "patterns": [
+                {
+                    "name": "constant.character.escape.mron",
+                    "match": "\\\\(?:[\"\\\\/bfnrt])"
+                },
+                {
+                    "name": "invalid.illegal.unrecognized-escape.mron",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "number": {
+            "patterns": [
+                {
+                    "comment": "Decimal number with optional separators",
+                    "name": "constant.numeric.decimal.mron",
+                    "match": "-?\\d[\\d_,]*\\.\\d[\\d_,]*\\b"
+                },
+                {
+                    "comment": "Integer with optional separators",
+                    "name": "constant.numeric.integer.mron",
+                    "match": "-?\\d[\\d_,]*\\b"
+                }
+            ]
+        },
+        "boolean": {
+            "name": "constant.language.boolean.mron",
+            "match": "\\b(?:true|false|yes|no)\\b"
+        },
+        "null": {
+            "name": "constant.language.null.mron",
+            "match": "\\bnull\\b"
+        },
+        "record": {
+            "begin": "\\{",
+            "end": "\\}",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.record.begin.mron" }
+            },
+            "endCaptures": {
+                "0": { "name": "punctuation.definition.record.end.mron" }
+            },
+            "name": "meta.record.mron",
+            "patterns": [
+                { "include": "#comments" },
+                { "include": "#key-value" },
+                { "include": "#value" }
+            ]
+        },
+        "list": {
+            "begin": "\\[",
+            "end": "\\]",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.list.begin.mron" }
+            },
+            "endCaptures": {
+                "0": { "name": "punctuation.definition.list.end.mron" }
+            },
+            "name": "meta.list.mron",
+            "patterns": [
+                { "include": "#comments" },
+                { "include": "#csv-header" },
+                { "include": "#key-value" },
+                { "include": "#value" }
+            ]
+        }
+    }
+}

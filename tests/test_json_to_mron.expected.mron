@@ -1,0 +1,12 @@
+name    "Alice"
+age     25
+active  yes
+address {
+    city "London"
+    zip  "SW1A"
+}
+tags    [ "admin" "user" ]
+friends (name age) [
+    "Bob" 26
+    "Charlie" 31
+]

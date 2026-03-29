@@ -1,0 +1,9 @@
+# This is a single-line comment
+
+###
+This is a multi-line
+comment!
+###
+
+# Comment before key
+name "Alice"  # inline comment not supported (this is after the value)

@@ -1,0 +1,5 @@
+# Basic MRON test
+
+name        "Alice"
+age         25
+is-adult    yes
