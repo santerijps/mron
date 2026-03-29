@@ -78,9 +78,15 @@ char *read_file(const char *path) {
         fprintf(stderr, "error: cannot open file '%s'\n", path);
         return NULL;
     }
+#ifdef _WIN32
+    _fseeki64(f, 0, SEEK_END);
+    long long size = _ftelli64(f);
+    _fseeki64(f, 0, SEEK_SET);
+#else
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
+#endif
     if (size < 0) {
         fprintf(stderr, "error: cannot determine size of '%s'\n", path);
         fclose(f);

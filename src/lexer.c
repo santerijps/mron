@@ -11,6 +11,7 @@ typedef struct {
     size_t pos;
     int line;
     int col;
+    int has_error;
 } LexerState;
 
 static char lex_peek(LexerState *L) {
@@ -70,6 +71,7 @@ static void skip_whitespace_and_comments(LexerState *L) {
                 if (c == '\0') {
                     mron_error(L->filename, start_line, start_col,
                                "unterminated multi-line comment (started here)");
+                    L->has_error = 1;
                     return;
                 }
                 if (c == '#' && L->source[L->pos + 1] == '#' && L->source[L->pos + 2] == '#') {
@@ -264,9 +266,16 @@ TokenArray *lexer_tokenize(const char *source, const char *filename) {
     L.pos = 0;
     L.line = 1;
     L.col = 1;
+    L.has_error = 0;
 
     for (;;) {
         skip_whitespace_and_comments(&L);
+        if (L.has_error) {
+            arr->has_error = 1;
+            token_array_add(arr, make_token(TOKEN_ERROR, "unterminated comment", L.line, L.col));
+            token_array_add(arr, make_simple_token(TOKEN_EOF, L.line, L.col));
+            break;
+        }
         char c = lex_peek(&L);
 
         if (c == '\0') {

@@ -4,9 +4,12 @@
 #include <string.h>
 #include <stdio.h>
 
+#define MAX_PARSE_DEPTH 256
+
 typedef struct {
     TokenArray *tokens;
     size_t pos;
+    int depth;
 } Parser;
 
 static Token *peek(Parser *P) {
@@ -88,6 +91,19 @@ static AstNode *parse_csv_list(Parser *P) {
         for (size_t i = 0; i < header_count; i++) free(headers[i]);
         free(headers);
         return NULL;
+    }
+
+    /* Check for duplicate header keys */
+    for (size_t i = 0; i < header_count; i++) {
+        for (size_t j = i + 1; j < header_count; j++) {
+            if (strcmp(headers[i], headers[j]) == 0) {
+                mron_error(P->tokens->filename, open_paren->line, open_paren->col,
+                           "duplicate key '%s' in CSV-style header", headers[i]);
+                for (size_t k = 0; k < header_count; k++) free(headers[k]);
+                free(headers);
+                return NULL;
+            }
+        }
     }
 
     if (header_count == 0) {
@@ -176,17 +192,12 @@ static AstNode *parse_record(Parser *P) {
     Token *open = expect(P, TOKEN_LBRACE);
     if (!open) return NULL;
 
-    AstNode *record = ast_new_record(open->line, open->col);
+    AstNode *record = parse_record_body(P, TOKEN_RBRACE);
+    if (!record) return NULL;
 
-    AstNode *body = parse_record_body(P, TOKEN_RBRACE);
-    if (!body) {
-        ast_free(record);
-        return NULL;
-    }
-
-    /* Transfer pairs from body to record */
-    ast_free(record);
-    record = body;
+    /* Fix position to the opening brace */
+    record->line = open->line;
+    record->col = open->col;
 
     if (!expect(P, TOKEN_RBRACE)) {
         ast_free(record);
@@ -229,9 +240,29 @@ static AstNode *parse_value(Parser *P) {
         return NULL;
     }
     case TOKEN_LBRACE:
-        return parse_record(P);
+    {
+        if (P->depth >= MAX_PARSE_DEPTH) {
+            mron_error(P->tokens->filename, tok->line, tok->col,
+                       "maximum nesting depth exceeded");
+            return NULL;
+        }
+        P->depth++;
+        AstNode *node = parse_record(P);
+        P->depth--;
+        return node;
+    }
     case TOKEN_LBRACKET:
-        return parse_list(P);
+    {
+        if (P->depth >= MAX_PARSE_DEPTH) {
+            mron_error(P->tokens->filename, tok->line, tok->col,
+                       "maximum nesting depth exceeded");
+            return NULL;
+        }
+        P->depth++;
+        AstNode *node = parse_list(P);
+        P->depth--;
+        return node;
+    }
     default:
         mron_error(P->tokens->filename, tok->line, tok->col,
                    "expected a value, got %s", token_type_name(tok->type));
@@ -270,6 +301,17 @@ static AstNode *parse_record_body(Parser *P, TokenType end_token) {
             return NULL;
         }
 
+        /* Check for duplicate keys */
+        for (size_t i = 0; i < record->data.record.count; i++) {
+            if (strcmp(record->data.record.pairs[i].key, key) == 0) {
+                mron_error(P->tokens->filename, key_tok->line, key_tok->col,
+                           "duplicate key '%s'", key);
+                ast_free(value);
+                ast_free(record);
+                return NULL;
+            }
+        }
+
         ast_record_add(record, key, value);
     }
 
@@ -284,6 +326,7 @@ AstNode *parser_parse(TokenArray *tokens) {
     Parser P;
     P.tokens = tokens;
     P.pos = 0;
+    P.depth = 0;
 
     AstNode *root = parse_record_body(&P, TOKEN_EOF);
     if (!root) return NULL;

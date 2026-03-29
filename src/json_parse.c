@@ -5,12 +5,15 @@
 #include <ctype.h>
 #include <stdio.h>
 
+#define MAX_JSON_DEPTH 256
+
 typedef struct {
     const char *source;
     const char *filename;
     size_t pos;
     int line;
     int col;
+    int depth;
 } JsonParser;
 
 static char jp_peek(JsonParser *P) {
@@ -146,6 +149,11 @@ static AstNode *jp_parse_string(JsonParser *P) {
                         return NULL;
                     }
                     cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                    mron_error(P->filename, P->line, P->col,
+                               "unexpected lone low surrogate \\u%04X", cp);
+                    sb_free(&sb);
+                    return NULL;
                 }
 
                 char utf8[4];
@@ -236,6 +244,10 @@ static AstNode *jp_parse_number(JsonParser *P) {
 static int jp_match_keyword(JsonParser *P, const char *kw) {
     size_t len = strlen(kw);
     if (strncmp(P->source + P->pos, kw, len) == 0) {
+        char next = P->source[P->pos + len];
+        if (isalnum((unsigned char)next) || next == '_') {
+            return 0;
+        }
         for (size_t i = 0; i < len; i++) {
             jp_advance(P);
         }
@@ -290,6 +302,18 @@ static AstNode *jp_parse_object(JsonParser *P) {
             free(key);
             ast_free(record);
             return NULL;
+        }
+
+        /* Check for duplicate keys */
+        for (size_t i = 0; i < record->data.record.count; i++) {
+            if (strcmp(record->data.record.pairs[i].key, key) == 0) {
+                mron_error(P->filename, P->line, P->col,
+                           "duplicate key \"%s\" in JSON object", key);
+                ast_free(value);
+                free(key);
+                ast_free(record);
+                return NULL;
+            }
         }
 
         ast_record_add(record, key, value);
@@ -365,9 +389,27 @@ static AstNode *jp_parse_value(JsonParser *P) {
     case '"':
         return jp_parse_string(P);
     case '{':
-        return jp_parse_object(P);
+    {
+        if (P->depth >= MAX_JSON_DEPTH) {
+            mron_error(P->filename, line, col, "maximum nesting depth exceeded");
+            return NULL;
+        }
+        P->depth++;
+        AstNode *node = jp_parse_object(P);
+        P->depth--;
+        return node;
+    }
     case '[':
-        return jp_parse_array(P);
+    {
+        if (P->depth >= MAX_JSON_DEPTH) {
+            mron_error(P->filename, line, col, "maximum nesting depth exceeded");
+            return NULL;
+        }
+        P->depth++;
+        AstNode *node = jp_parse_array(P);
+        P->depth--;
+        return node;
+    }
     case 't':
         if (jp_match_keyword(P, "true")) return ast_new_bool(1, line, col);
         mron_error(P->filename, line, col, "invalid JSON value");
@@ -400,6 +442,7 @@ AstNode *json_parse(const char *source, const char *filename) {
     P.pos = 0;
     P.line = 1;
     P.col = 1;
+    P.depth = 0;
 
     AstNode *root = jp_parse_value(&P);
     if (!root) return NULL;
