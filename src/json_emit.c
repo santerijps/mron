@@ -82,3 +82,79 @@ char *json_emit(AstNode *root) {
     sb_append_char(&sb, '\n');
     return sb_finish(&sb);
 }
+
+/* --- Pretty-printed JSON emitter --- */
+
+static void emit_pretty_value(StringBuilder *sb, AstNode *node, int depth);
+
+static void emit_pretty_indent(StringBuilder *sb, int depth) {
+    for (int i = 0; i < depth; i++) {
+        sb_append(sb, "  ");
+    }
+}
+
+static void emit_pretty_record(StringBuilder *sb, AstNode *node, int depth) {
+    if (node->data.record.count == 0) {
+        sb_append(sb, "{}");
+        return;
+    }
+    sb_append(sb, "{\n");
+    for (size_t i = 0; i < node->data.record.count; i++) {
+        if (i > 0) sb_append(sb, ",\n");
+        emit_pretty_indent(sb, depth + 1);
+        emit_json_string(sb, node->data.record.pairs[i].key);
+        sb_append(sb, ": ");
+        emit_pretty_value(sb, node->data.record.pairs[i].value, depth + 1);
+    }
+    sb_append_char(sb, '\n');
+    emit_pretty_indent(sb, depth);
+    sb_append_char(sb, '}');
+}
+
+static void emit_pretty_list(StringBuilder *sb, AstNode *node, int depth) {
+    if (node->data.list.count == 0) {
+        sb_append(sb, "[]");
+        return;
+    }
+    sb_append(sb, "[\n");
+    for (size_t i = 0; i < node->data.list.count; i++) {
+        if (i > 0) sb_append(sb, ",\n");
+        emit_pretty_indent(sb, depth + 1);
+        emit_pretty_value(sb, node->data.list.items[i], depth + 1);
+    }
+    sb_append_char(sb, '\n');
+    emit_pretty_indent(sb, depth);
+    sb_append_char(sb, ']');
+}
+
+static void emit_pretty_value(StringBuilder *sb, AstNode *node, int depth) {
+    switch (node->type) {
+    case AST_STRING:
+        emit_json_string(sb, node->data.string_val);
+        break;
+    case AST_NUMBER:
+        sb_append(sb, node->data.number_str);
+        break;
+    case AST_BOOL:
+        sb_append(sb, node->data.bool_val ? "true" : "false");
+        break;
+    case AST_NULL:
+        sb_append(sb, "null");
+        break;
+    case AST_RECORD:
+        emit_pretty_record(sb, node, depth);
+        break;
+    case AST_LIST:
+        emit_pretty_list(sb, node, depth);
+        break;
+    }
+}
+
+char *json_emit_pretty(AstNode *root) {
+    if (!root) return NULL;
+    StringBuilder sb;
+    sb_init(&sb);
+    emit_pretty_value(&sb, root, 0);
+    sb_append_char(&sb, '\n');
+    return sb_finish(&sb);
+}

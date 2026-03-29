@@ -1,5 +1,6 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Wpedantic -std=c99 -Isrc
+MRON_VERSION ?= 0.1.0
+CFLAGS  = -Wall -Wextra -Wpedantic -std=c99 -Isrc -DMRON_VERSION='"$(MRON_VERSION)"'
 LDFLAGS =
 
 SRC = src/util.c src/ast.c src/lexer.c src/parser.c \
