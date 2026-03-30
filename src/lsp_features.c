@@ -1,17 +1,14 @@
 #include "lsp_server.h"
 #include "lsp_json.h"
-#include "lsp_transport.h"
 #include "util.h"
 #include "ast.h"
 #include "ast_ops.h"
 #include "lexer.h"
-#include "json_emit.h"
 #include "mron_emit.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 /* ================================================================== */
 /* Feature 1: Document Symbols                                         */

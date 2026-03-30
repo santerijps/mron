@@ -7,15 +7,10 @@
 #include "lexer.h"
 #include "parser.h"
 #include "json_parse.h"
-#include "json_emit.h"
-#include "mron_emit.h"
-#include "yaml_emit.h"
-#include "toml_emit.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 /* ================================================================== */
 /* Document store                                                      */
