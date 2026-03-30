@@ -23,7 +23,7 @@ That's valid MRON. No `:`, no `,`. Just keys and values.
 
 ## Quick start
 
-This repository includes **mronc**, a bidirectional translator between MRON and JSON.
+This repository includes **mronc**, a bidirectional translator between MRON, JSON, YAML, and TOML.
 
 ```sh
 # MRON → JSON  (input format detected from extension)
@@ -34,18 +34,223 @@ mronc config.mron -o config.json    # JSON to file
 mronc config.json                   # MRON to stdout
 mronc config.json -o config.mron    # MRON to file
 
-# Pipe-friendly — pair with jq for pretty-printed JSON
-mronc config.mron | jq .
+# Convert to any format
+mronc config.mron -t yaml           # YAML to stdout
+mronc config.mron -t toml           # TOML to stdout
+
+# Pipe-friendly
+mronc config.mron -p | jq .         # pretty JSON
+echo '{"key":"val"}' | mronc -      # auto-detects JSON from stdin
 ```
 
 ### Build from source
 
 ```sh
 make          # produces mronc (or mronc.exe on Windows)
+make release  # optimized build (-O3, LTO, stripped)
 make test     # runs the test suite
 ```
 
 Requires a C99 compiler (GCC, Clang, MSVC).
+
+## CLI reference
+
+```
+mronc [options] <input-file> [<input-file2> ...]
+mronc [options] -                (read from stdin)
+mronc --diff <file1> <file2>     (semantic diff)
+mronc --merge <file1> <file2>    (deep merge)
+```
+
+### Conversion options
+
+| Flag | Description |
+|---|---|
+| `-o, --output <file>` | Write output to a file (or directory for batch mode) |
+| `-t, --to <format>` | Force output format: `mron`, `json`, `yaml`, `toml` |
+| `--from <format>` | Force input format: `mron` or `json` |
+| `-p, --pretty` | Pretty-print JSON output (2-space indent) |
+| `-m, --minify` | Minify output (compact MRON or compact JSON) |
+| `--sort-keys` | Sort record keys alphabetically in output |
+| `--indent <n>` | Set indentation width (0–16 spaces) |
+| `--strip-comments` | Re-emit MRON with all comments removed |
+
+### Query & transform
+
+| Flag | Description |
+|---|---|
+| `-q, --query <path>` | Extract a value by dot-path (e.g. `server.port`, `items.0.name`) |
+| `--merge <file>` | Deep-merge a second file over the input |
+| `--diff <file>` | Semantic diff between input and this file |
+
+### Validation
+
+| Flag | Description |
+|---|---|
+| `-c, --check` | Validate input without producing output |
+| `--strict` | Warn about empty records, empty lists, and null values (with `--check`) |
+| `--schema <file>` | Validate input against a schema file |
+
+### Other
+
+| Flag | Description |
+|---|---|
+| `-w, --watch` | Watch input file and re-convert on change |
+| `-v, --verbose` | Show processing details on stderr |
+| `-V, --version` | Print version and exit |
+| `-h, --help` | Show help message |
+
+### Feature details
+
+#### Multi-format output (`--to`)
+
+By default, mronc converts MRON→JSON and JSON→MRON. Use `--to` to target any format:
+
+```sh
+mronc config.mron -t yaml       # MRON → YAML
+mronc config.mron -t toml       # MRON → TOML
+mronc data.json -t mron         # JSON → MRON (same as default)
+mronc config.mron -t json -p    # MRON → pretty JSON
+```
+
+#### Minify (`-m`)
+
+Produces the most compact representation possible:
+
+```sh
+mronc config.mron -m -t mron
+```
+
+```mron
+name "Alice"
+age 25
+address {city "London" zip "SW1A"}
+```
+
+#### Sort keys (`--sort-keys`)
+
+Outputs records with keys in alphabetical order — useful for diffing or canonical output:
+
+```sh
+mronc config.mron --sort-keys -p
+```
+
+#### Custom indentation (`--indent`)
+
+```sh
+mronc config.mron -p --indent 4     # 4-space JSON
+mronc config.mron -t mron --indent 8  # 8-space MRON
+```
+
+#### Query (`-q`)
+
+Extract a single value by dot-path. Supports record keys and list indices:
+
+```sh
+mronc config.mron -q server.port       # → 8080
+mronc config.mron -q admins.0.name     # → Alice
+mronc config.mron -q features          # → ["auth","logging","rate-limit"]
+```
+
+Records and lists at the queried path are printed as JSON. Scalars are printed as plain text.
+
+#### Deep merge (`--merge`)
+
+Combines two files by deep-merging the second over the first. Records are merged key-by-key; non-record values are replaced entirely:
+
+```sh
+mronc base.mron --merge overrides.mron -o merged.json
+```
+
+#### Semantic diff (`--diff`)
+
+Compares two files structurally (ignoring formatting, comments, and key order) and reports added, removed, and changed values:
+
+```sh
+mronc old.mron --diff new.mron
+```
+
+```
+  name: changed ("Alice" -> "Bob")
+  age: removed (was 25)
+  email: added ("bob@example.com")
+2 difference(s) found.
+```
+
+Exit code is 0 if identical, 1 if differences were found.
+
+#### Strip comments (`--strip-comments`)
+
+Re-emits MRON with all comments removed — useful for producing clean output:
+
+```sh
+mronc config.mron --strip-comments > clean.mron
+```
+
+#### Stdin auto-detection
+
+When reading from `-` (stdin) without `--from`, mronc examines the first non-whitespace character to guess the format: `{` or `[` → JSON, anything else → MRON.
+
+```sh
+echo '{"hello":"world"}' | mronc -             # detected as JSON → MRON
+cat config.mron | mronc - -t json              # detected as MRON → JSON
+```
+
+#### Batch mode
+
+Pass multiple input files. With `-o` pointing to a directory (trailing `/`), each file gets its own output:
+
+```sh
+mronc a.mron b.mron c.mron -o output/
+# produces output/a.json, output/b.json, output/c.json
+```
+
+#### Watch mode (`-w`)
+
+Watches a single file and re-converts whenever it changes:
+
+```sh
+mronc config.mron -w -o config.json    # re-converts on every save
+```
+
+Polls every 500ms. Press Ctrl+C to stop.
+
+#### Strict validation (`--strict`)
+
+Use with `--check` to get additional warnings about stylistic issues:
+
+```sh
+mronc config.mron -c --strict
+```
+
+Warns about:
+- Empty records (`{}`)
+- Empty lists (`[]`)
+- Null values
+
+#### Schema validation (`--schema`)
+
+Validate that a data file conforms to a schema. The schema is itself an MRON (or JSON) file where leaf string values act as type constraints:
+
+```mron
+# schema.mron
+name    "string"
+age     "number"
+active  "bool"
+address {
+    city "string"
+    zip  "string"
+}
+```
+
+```sh
+mronc data.mron --schema schema.mron -c
+```
+
+Schema rules:
+- `"string"`, `"number"`, `"bool"`, `"any"` — leaf type constraints
+- Records in the schema require matching records in data (keys are checked)
+- A list with one element means all data items must match that element's type
 
 ## Examples
 
@@ -219,8 +424,11 @@ admins (name email role) [
 
 - **Application config files** — cleaner than JSON, safer than YAML
 - **Static data / seed files** — CSV-style lists are perfect for tabular data like users, products, translations
-- **CI/CD pipelines** — human-readable definitions that are easy to diff
+- **CI/CD pipelines** — human-readable definitions that are easy to diff; use `--diff` to compare configs semantically
 - **API fixture data** — write test payloads quickly without quote/comma fatigue
+- **Config management** — `--merge` overlays let you maintain base + environment overrides
+- **Format migration** — convert freely between MRON, JSON, YAML, and TOML
+- **Schema enforcement** — validate configs against a schema before deployment
 - **Anywhere you'd reach for JSON or YAML** — MRON round-trips losslessly to JSON
 
 ## Syntax reference

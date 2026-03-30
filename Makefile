@@ -3,8 +3,9 @@ MRON_VERSION ?= 0.1.0
 CFLAGS  = -Wall -Wextra -Wpedantic -std=c99 -Isrc -DMRON_VERSION='"$(MRON_VERSION)"'
 LDFLAGS =
 
-SRC = src/util.c src/ast.c src/lexer.c src/parser.c \
-      src/json_emit.c src/mron_emit.c src/json_parse.c src/main.c
+SRC = src/util.c src/ast.c src/ast_ops.c src/lexer.c src/parser.c \
+      src/json_emit.c src/mron_emit.c src/json_parse.c \
+      src/yaml_emit.c src/toml_emit.c src/main.c
 OBJ = $(SRC:.c=.o)
 TARGET = mronc
 

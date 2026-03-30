@@ -9,4 +9,7 @@ char *json_emit(AstNode *root);
 /* Emit pretty-printed JSON (2-space indent). Caller must free the returned string. */
 char *json_emit_pretty(AstNode *root);
 
+/* Emit pretty-printed JSON with custom indent width. */
+char *json_emit_indent(AstNode *root, int indent_width);
+
 #endif
