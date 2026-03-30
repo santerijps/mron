@@ -10,9 +10,7 @@
     "categories": [
         "Programming Languages"
     ],
-    "activationEvents": [
-        "onLanguage:mron"
-    ],
+    "activationEvents": [],
     "main": "./extension.js",
     "contributes": {
         "languages": [
