@@ -1,8 +1,8 @@
 {
     "name": "mron",
     "displayName": "MRON - Minimal Rich Object Notation",
-    "description": "Syntax highlighting for .mron files",
-    "version": "0.1.0",
+    "description": "Language support for .mron files (syntax highlighting, LSP diagnostics, completions, hover, and more)",
+    "version": "0.2.0",
     "publisher": "mron",
     "engines": {
         "vscode": "^1.75.0"
@@ -10,6 +10,10 @@
     "categories": [
         "Programming Languages"
     ],
+    "activationEvents": [
+        "onLanguage:mron"
+    ],
+    "main": "./extension.js",
     "contributes": {
         "languages": [
             {
@@ -34,6 +38,28 @@
                 "scopeName": "source.mron",
                 "path": "./syntaxes/mron.tmLanguage.json"
             }
-        ]
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "MRON",
+            "properties": {
+                "mron.serverPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the mron-lsp binary. If empty, the extension looks for it next to the extension or on PATH."
+                },
+                "mron.schema": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to an MRON schema file for live validation."
+                }
+            }
+        }
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.75.0"
     }
 }

@@ -53,6 +53,14 @@ make test     # runs the test suite
 
 Requires a C99 compiler (GCC, Clang, MSVC).
 
+### Build the language server
+
+```sh
+make lsp     # produces mron-lsp (or mron-lsp.exe on Windows)
+```
+
+The language server speaks the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) over stdio. Any editor that supports LSP can use it — VS Code, Neovim, Helix, Sublime Text, etc.
+
 ## CLI reference
 
 ```
@@ -468,9 +476,48 @@ All whitespace (spaces, tabs, newlines) is treated uniformly as a delimiter. Ind
 - **Single-line:** `# everything after the hash`
 - **Multi-line:** `### ... ###`
 
-## VS Code extension
+## Editor support
 
-A syntax highlighting extension for `.mron` files is included in the [`mron-vscode/`](mron-vscode//) directory.
+### VS Code extension
+
+A full-featured extension for `.mron` files is included in the [`mron-vscode/`](mron-vscode/) directory. It bundles syntax highlighting via TextMate grammar and an LSP client that connects to `mron-lsp`.
+
+**Setup:**
+1. `make lsp` to build `mron-lsp` (place the binary on your PATH or next to the extension folder).
+2. Copy or symlink `mron-vscode/` into `~/.vscode/extensions/mron`.
+3. `cd mron-vscode && npm install` to fetch the `vscode-languageclient` dependency.
+4. Restart VS Code and open any `.mron` file.
+
+### Language server features
+
+The `mron-lsp` binary provides the following LSP capabilities:
+
+| Feature | Description |
+|---|---|
+| **Diagnostics** | Real-time error reporting — lexer errors, unmatched delimiters, CSV column count mismatches, and schema violations |
+| **Document Symbols** | Hierarchical outline of all keys with type-aware icons |
+| **Folding Ranges** | Fold `{}`/`[]`/`()` blocks and `### ###` comment blocks |
+| **Hover** | Type information for keys, values, and CSV columns |
+| **Go to Definition** | Jump from a CSV value to its column header |
+| **Completions** | Boolean/null keywords, sibling keys, and existing key names |
+| **Code Actions** | Normalize `yes`/`no` → `true`/`false`, sort keys alphabetically, expand CSV to record syntax |
+| **Semantic Tokens** | Rich token classification — keys, CSV headers, strings, numbers, keywords, operators |
+| **Formatting** | Whole-document reformat via parse→re-emit |
+| **Rename** | Rename keys or CSV column headers across the document |
+| **Document Links** | Clickable file paths (`.mron`, `.json`, `.yaml`, `.toml`) in string values |
+| **Selection Range** | Smart expand selection: token → enclosing block → document |
+| **Inlay Hints** | Ghost-text column labels on CSV values (MRON-specific) |
+| **Color Provider** | Inline color swatches for hex colors (`#RGB`, `#RRGGBB`, `#RRGGBBAA`) in strings |
+| **Code Lens** | Top-of-file key count + "Preview as JSON/YAML/TOML" commands |
+
+### Configuration
+
+The VS Code extension exposes two settings:
+
+| Setting | Default | Description |
+|---|---|---|
+| `mron.serverPath` | `""` | Custom path to the `mron-lsp` binary. If empty, the extension looks next to the extension folder and then on PATH. |
+| `mron.schema` | `""` | Path to an MRON schema file for live validation. |
 
 ## License
 
