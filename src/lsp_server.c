@@ -272,6 +272,208 @@ const CsvBlockInfo *lsp_csv_block_for_token(const CsvBlockInfo *blocks,
 /* Diagnostics                                                         */
 /* ================================================================== */
 
+static void emit_diag(LspJson *j, int sl, int sc, int el, int ec,
+                      int severity, const char *source, const char *message) {
+    lj_object_start(j);
+    lj_key(j, "range"); lj_range(j, sl, sc, el, ec);
+    lj_key(j, "severity"); lj_int(j, severity);
+    lj_key(j, "source"); lj_string(j, source);
+    lj_key(j, "message"); lj_string(j, message);
+    lj_object_end(j);
+}
+
+static int is_keyword(const char *v) {
+    return strcmp(v, "true") == 0 || strcmp(v, "false") == 0 ||
+           strcmp(v, "yes") == 0  || strcmp(v, "no") == 0 ||
+           strcmp(v, "null") == 0;
+}
+
+/* Detect duplicate keys at every nesting level by scanning tokens.
+   Returns the number of diagnostics emitted. */
+static int check_duplicate_keys(const TokenArray *tokens, LspJson *j) {
+    int found = 0;
+
+    /* Stack of key-sets, one per nesting scope. */
+    #define DK_MAX_DEPTH 64
+    KeySet scopes[DK_MAX_DEPTH];
+    /* first_line/first_col: where we first saw each key (for "first defined here") */
+    /* We store per-scope key→line/col in parallel arrays */
+    typedef struct { char *key; int line; int col; } KeyLoc;
+    KeyLoc *locs[DK_MAX_DEPTH];
+    int loc_counts[DK_MAX_DEPTH];
+    int loc_caps[DK_MAX_DEPTH];
+    int depth = 0;
+
+    keyset_init(&scopes[0], 16);
+    locs[0] = NULL; loc_counts[0] = 0; loc_caps[0] = 0;
+
+    /* State: are we expecting a key (1) or a value (0)? */
+    int expect_key = 1;
+
+    for (size_t i = 0; i < tokens->count; i++) {
+        Token *t = &tokens->tokens[i];
+        if (t->type == TOKEN_EOF) break;
+
+        /* Open scope */
+        if (t->type == TOKEN_LBRACE) {
+            if (depth + 1 < DK_MAX_DEPTH) {
+                depth++;
+                keyset_init(&scopes[depth], 16);
+                locs[depth] = NULL;
+                loc_counts[depth] = 0;
+                loc_caps[depth] = 0;
+            }
+            expect_key = 1;
+            continue;
+        }
+
+        /* Close scope */
+        if (t->type == TOKEN_RBRACE) {
+            if (depth > 0) {
+                keyset_free(&scopes[depth]);
+                for (int k = 0; k < loc_counts[depth]; k++)
+                    free(locs[depth][k].key);
+                free(locs[depth]);
+                depth--;
+            }
+            expect_key = 1;
+            continue;
+        }
+
+        /* Skip inside lists/parens — keys only exist in record contexts.
+           Track bracket/paren depth to skip their contents. */
+        if (t->type == TOKEN_LBRACKET || t->type == TOKEN_LPAREN) {
+            int inner = 1;
+            TokenType open = t->type;
+            TokenType close = (open == TOKEN_LBRACKET) ? TOKEN_RBRACKET : TOKEN_RPAREN;
+            i++;
+            while (i < tokens->count && inner > 0) {
+                if (tokens->tokens[i].type == open) inner++;
+                else if (tokens->tokens[i].type == close) inner--;
+                i++;
+            }
+            i--; /* loop will increment */
+            expect_key = 1;
+            continue;
+        }
+
+        if (t->type == TOKEN_IDENT && expect_key && !is_keyword(t->value)) {
+            /* This looks like a key. Check for duplicate. */
+            int first_line = -1;
+            /* Find if this key was already seen in this scope */
+            for (int k = 0; k < loc_counts[depth]; k++) {
+                if (strcmp(locs[depth][k].key, t->value) == 0) {
+                    first_line = locs[depth][k].line;
+                    break;
+                }
+            }
+
+            if (keyset_insert(&scopes[depth], t->value)) {
+                /* Duplicate! */
+                int l = t->line - 1;
+                int c = t->col - 1;
+                int len = (int)strlen(t->value);
+                char msg[256];
+                if (first_line >= 0) {
+                    snprintf(msg, sizeof(msg),
+                             "duplicate key '%s' (first defined on line %d)",
+                             t->value, first_line);
+                } else {
+                    snprintf(msg, sizeof(msg), "duplicate key '%s'", t->value);
+                }
+                emit_diag(j, l, c, l, c + len, 1, "mron", msg);
+                found++;
+            } else {
+                /* Record first occurrence location */
+                if (loc_counts[depth] >= loc_caps[depth]) {
+                    loc_caps[depth] = loc_caps[depth] == 0 ? 8 : loc_caps[depth] * 2;
+                    locs[depth] = realloc(locs[depth],
+                        (size_t)loc_caps[depth] * sizeof(KeyLoc));
+                }
+                locs[depth][loc_counts[depth]].key = mron_strdup(t->value);
+                locs[depth][loc_counts[depth]].line = t->line;
+                locs[depth][loc_counts[depth]].col = t->col;
+                loc_counts[depth]++;
+            }
+
+            expect_key = 0; /* next should be a value */
+            continue;
+        }
+
+        /* After seeing a value, expect a key again */
+        if (!expect_key) {
+            expect_key = 1;
+        }
+    }
+
+    /* Cleanup remaining scopes */
+    for (int d = 0; d <= depth; d++) {
+        keyset_free(&scopes[d]);
+        for (int k = 0; k < loc_counts[d]; k++)
+            free(locs[d][k].key);
+        free(locs[d]);
+    }
+
+    return found;
+    #undef DK_MAX_DEPTH
+}
+
+/* Detect identifiers in value position that are not keywords. */
+static int check_bad_value_idents(const TokenArray *tokens, LspJson *j) {
+    int found = 0;
+    int expect_key = 1;
+
+    for (size_t i = 0; i < tokens->count; i++) {
+        Token *t = &tokens->tokens[i];
+        if (t->type == TOKEN_EOF) break;
+
+        if (t->type == TOKEN_LBRACE) { expect_key = 1; continue; }
+        if (t->type == TOKEN_RBRACE) { expect_key = 1; continue; }
+
+        if (t->type == TOKEN_LBRACKET || t->type == TOKEN_LPAREN) {
+            int inner = 1;
+            TokenType open = t->type;
+            TokenType close = (open == TOKEN_LBRACKET) ? TOKEN_RBRACKET : TOKEN_RPAREN;
+            i++;
+            while (i < tokens->count && inner > 0) {
+                if (tokens->tokens[i].type == open) inner++;
+                else if (tokens->tokens[i].type == close) inner--;
+                i++;
+            }
+            i--;
+            expect_key = 1;
+            continue;
+        }
+
+        if (t->type == TOKEN_IDENT && expect_key && !is_keyword(t->value)) {
+            expect_key = 0; /* this is a key, next is value */
+            continue;
+        }
+
+        if (t->type == TOKEN_IDENT && !expect_key && !is_keyword(t->value)) {
+            /* Non-keyword identifier in value position */
+            int l = t->line - 1;
+            int c = t->col - 1;
+            int len = (int)strlen(t->value);
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "unexpected identifier '%s' in value position "
+                     "(did you mean \"%s\"?)",
+                     t->value, t->value);
+            emit_diag(j, l, c, l, c + len, 1, "mron", msg);
+            found++;
+            expect_key = 1;
+            continue;
+        }
+
+        /* Any actual value token: next should be a key */
+        if (!expect_key) {
+            expect_key = 1;
+        }
+    }
+    return found;
+}
+
 void lsp_publish_diagnostics(LspDocument *doc) {
     LspJson j;
     lj_init(&j);
@@ -291,112 +493,165 @@ void lsp_publish_diagnostics(LspDocument *doc) {
               if (t->type == TOKEN_ERROR) {
                   int l = t->line - 1;
                   int c = t->col - 1;
-                  lj_object_start(&j);
-                  lj_key(&j, "range"); lj_range(&j, l, c, l, c + 1);
-                  lj_key(&j, "severity"); lj_int(&j, 1); /* Error */
-                  lj_key(&j, "source"); lj_string(&j, "mron");
-                  lj_key(&j, "message"); lj_string(&j, t->value ? t->value : "syntax error");
-                  lj_object_end(&j);
+                  int len = t->value ? (int)strlen(t->value) : 1;
+                  if (len < 1) len = 1;
+                  emit_diag(&j, l, c, l, c + 1, 1, "mron",
+                            t->value ? t->value : "syntax error");
               }
           }
 
-          /* If lexer succeeded but parser failed */
-          if (!doc->tokens->has_error && !doc->ast) {
-              /* Find approximate error location from tokens */
-              int err_line = 0, err_col = 0;
-              /* Check for unmatched delimiters */
-              int braces = 0, brackets = 0, parens = 0;
-              int last_open_line = 0, last_open_col = 0;
-              for (size_t i = 0; i < doc->tokens->count; i++) {
-                  Token *t = &doc->tokens->tokens[i];
-                  switch (t->type) {
-                  case TOKEN_LBRACE:   braces++; last_open_line = t->line; last_open_col = t->col; break;
-                  case TOKEN_RBRACE:   braces--; break;
-                  case TOKEN_LBRACKET: brackets++; last_open_line = t->line; last_open_col = t->col; break;
-                  case TOKEN_RBRACKET: brackets--; break;
-                  case TOKEN_LPAREN:   parens++; last_open_line = t->line; last_open_col = t->col; break;
-                  case TOKEN_RPAREN:   parens--; break;
-                  default: break;
-                  }
-                  /* If we go negative, this closing delimiter is unmatched */
-                  if (braces < 0 || brackets < 0 || parens < 0) {
-                      err_line = t->line - 1;
-                      err_col = t->col - 1;
-                      const char *msg = braces < 0 ? "unexpected '}'" :
-                                        brackets < 0 ? "unexpected ']'" : "unexpected ')'";
-                      lj_object_start(&j);
-                      lj_key(&j, "range"); lj_range(&j, err_line, err_col, err_line, err_col + 1);
-                      lj_key(&j, "severity"); lj_int(&j, 1);
-                      lj_key(&j, "source"); lj_string(&j, "mron");
-                      lj_key(&j, "message"); lj_string(&j, msg);
-                      lj_object_end(&j);
-                      break;
-                  }
-              }
-              /* If delimiters are unclosed at EOF */
-              if (braces > 0 || brackets > 0 || parens > 0) {
-                  const char *msg = braces > 0 ? "unclosed '{'" :
-                                    brackets > 0 ? "unclosed '['" : "unclosed '('";
-                  lj_object_start(&j);
-                  lj_key(&j, "range");
-                  lj_range(&j, last_open_line - 1, last_open_col - 1,
-                               last_open_line - 1, last_open_col);
-                  lj_key(&j, "severity"); lj_int(&j, 1);
-                  lj_key(&j, "source"); lj_string(&j, "mron");
-                  lj_key(&j, "message"); lj_string(&j, msg);
-                  lj_object_end(&j);
-              }
-              /* Generic parse error if no structural issue found */
-              if (braces == 0 && brackets == 0 && parens == 0 &&
-                  braces >= 0 && brackets >= 0 && parens >= 0) {
-                  lj_object_start(&j);
-                  lj_key(&j, "range"); lj_range(&j, 0, 0, 0, 1);
-                  lj_key(&j, "severity"); lj_int(&j, 1);
-                  lj_key(&j, "source"); lj_string(&j, "mron");
-                  lj_key(&j, "message"); lj_string(&j, "parse error");
-                  lj_object_end(&j);
-              }
-          }
+          if (!doc->tokens->has_error) {
+              /* Duplicate key detection (works even when parser fails) */
+              int dup_count = check_duplicate_keys(doc->tokens, &j);
 
-          /* CSV column count mismatch (warning) */
-          if (doc->tokens && !doc->tokens->has_error) {
-              int csv_count = 0;
-              CsvBlockInfo *csv_blocks = lsp_find_csv_blocks(doc->tokens, &csv_count);
-              for (int b = 0; b < csv_count; b++) {
-                  CsvBlockInfo *blk = &csv_blocks[b];
-                  if (blk->col_count > 0 && blk->value_count % blk->col_count != 0) {
-                      Token *t = &doc->tokens->tokens[blk->bracket_open];
-                      int l = t->line - 1;
-                      int c = t->col - 1;
-                      char msg[256];
-                      snprintf(msg, sizeof(msg),
-                               "CSV list has %d values but %d columns "
-                               "(values should be a multiple of column count)",
-                               blk->value_count, blk->col_count);
-                      lj_object_start(&j);
-                      lj_key(&j, "range"); lj_range(&j, l, c, l, c + 1);
-                      lj_key(&j, "severity"); lj_int(&j, 1);
-                      lj_key(&j, "source"); lj_string(&j, "mron");
-                      lj_key(&j, "message"); lj_string(&j, msg);
-                      lj_object_end(&j);
+              /* Identifier-in-value-position detection */
+              int bad_val_count = check_bad_value_idents(doc->tokens, &j);
+
+              /* CSV column count mismatch */
+              int csv_mismatch_count = 0;
+              {
+                  int csv_count = 0;
+                  CsvBlockInfo *csv_blocks = lsp_find_csv_blocks(doc->tokens, &csv_count);
+                  for (int b = 0; b < csv_count; b++) {
+                      CsvBlockInfo *blk = &csv_blocks[b];
+                      if (blk->col_count > 0 && blk->value_count % blk->col_count != 0) {
+                          Token *kt = &doc->tokens->tokens[blk->key_idx];
+                          int rows = blk->value_count / blk->col_count;
+                          int extra = blk->value_count % blk->col_count;
+                          /* Point at the first leftover value */
+                          int first_extra_idx = blk->value_indices[rows * blk->col_count];
+                          Token *et = &doc->tokens->tokens[first_extra_idx];
+                          int elen = et->value ? (int)strlen(et->value) : 1;
+                          if (et->type == TOKEN_STRING) elen += 2; /* quotes */
+                          char msg[512];
+                          snprintf(msg, sizeof(msg),
+                                   "CSV list '%s' expects %d value(s) per row, "
+                                   "but row %d only has %d — "
+                                   "value %s%s%s starts an incomplete row (%d total values for %d columns)",
+                                   kt->value, blk->col_count,
+                                   rows + 1, extra,
+                                   et->type == TOKEN_STRING ? "\"" : "",
+                                   et->value ? et->value : "?",
+                                   et->type == TOKEN_STRING ? "\"" : "",
+                                   blk->value_count, blk->col_count);
+                          emit_diag(&j, et->line - 1, et->col - 1,
+                                        et->line - 1, et->col - 1 + elen, 1, "mron", msg);
+                          csv_mismatch_count++;
+                      }
+                  }
+                  lsp_free_csv_blocks(csv_blocks, csv_count);
+              }
+
+              /* If parser still failed and we didn't find specific issues, check structure */
+              if (!doc->ast && dup_count == 0 && bad_val_count == 0 && csv_mismatch_count == 0) {
+                  int braces = 0, brackets = 0, parens = 0;
+                  int last_open_line = 0, last_open_col = 0;
+                  int structural_error = 0;
+
+                  for (size_t i = 0; i < doc->tokens->count; i++) {
+                      Token *t = &doc->tokens->tokens[i];
+                      switch (t->type) {
+                      case TOKEN_LBRACE:   braces++; last_open_line = t->line; last_open_col = t->col; break;
+                      case TOKEN_RBRACE:   braces--; break;
+                      case TOKEN_LBRACKET: brackets++; last_open_line = t->line; last_open_col = t->col; break;
+                      case TOKEN_RBRACKET: brackets--; break;
+                      case TOKEN_LPAREN:   parens++; last_open_line = t->line; last_open_col = t->col; break;
+                      case TOKEN_RPAREN:   parens--; break;
+                      default: break;
+                      }
+                      if (braces < 0 || brackets < 0 || parens < 0) {
+                          const char *msg = braces < 0 ? "unexpected '}' with no matching '{'" :
+                                            brackets < 0 ? "unexpected ']' with no matching '['" :
+                                            "unexpected ')' with no matching '('";
+                          emit_diag(&j, t->line - 1, t->col - 1,
+                                        t->line - 1, t->col, 1, "mron", msg);
+                          structural_error = 1;
+                          break;
+                      }
+                  }
+                  if (!structural_error && (braces > 0 || brackets > 0 || parens > 0)) {
+                      char msg[128];
+                      if (braces > 0)
+                          snprintf(msg, sizeof(msg), "unclosed '{' (opened at line %d)", last_open_line);
+                      else if (brackets > 0)
+                          snprintf(msg, sizeof(msg), "unclosed '[' (opened at line %d)", last_open_line);
+                      else
+                          snprintf(msg, sizeof(msg), "unclosed '(' (opened at line %d)", last_open_line);
+                      emit_diag(&j, last_open_line - 1, last_open_col - 1,
+                                    last_open_line - 1, last_open_col, 1, "mron", msg);
+                      structural_error = 1;
+                  }
+                  if (!structural_error) {
+                      /* Try to find where the parser likely choked */
+                      /* Look for a number or string in key position */
+                      int expect_key = 1;
+                      int reported = 0;
+                      for (size_t i = 0; i < doc->tokens->count && !reported; i++) {
+                          Token *t = &doc->tokens->tokens[i];
+                          if (t->type == TOKEN_EOF) break;
+                          if (t->type == TOKEN_LBRACE) { expect_key = 1; continue; }
+                          if (t->type == TOKEN_RBRACE) { expect_key = 1; continue; }
+                          if (t->type == TOKEN_LBRACKET || t->type == TOKEN_LPAREN) {
+                              int inner = 1;
+                              TokenType open = t->type;
+                              TokenType close = (open == TOKEN_LBRACKET) ? TOKEN_RBRACKET : TOKEN_RPAREN;
+                              i++;
+                              while (i < doc->tokens->count && inner > 0) {
+                                  if (doc->tokens->tokens[i].type == open) inner++;
+                                  else if (doc->tokens->tokens[i].type == close) inner--;
+                                  i++;
+                              }
+                              i--;
+                              expect_key = 1;
+                              continue;
+                          }
+                          if (expect_key) {
+                              if (t->type == TOKEN_STRING) {
+                                  char msg[256];
+                                  snprintf(msg, sizeof(msg),
+                                           "expected a key, got string \"%s\" "
+                                           "(keys must be unquoted identifiers)",
+                                           t->value);
+                                  emit_diag(&j, t->line - 1, t->col - 1,
+                                                t->line - 1, t->col - 1 + (int)strlen(t->value) + 2,
+                                                1, "mron", msg);
+                                  reported = 1;
+                              } else if (t->type == TOKEN_NUMBER) {
+                                  char msg[256];
+                                  snprintf(msg, sizeof(msg),
+                                           "expected a key, got number %s "
+                                           "(keys must be identifiers, not numbers)",
+                                           t->value);
+                                  emit_diag(&j, t->line - 1, t->col - 1,
+                                                t->line - 1, t->col - 1 + (int)strlen(t->value),
+                                                1, "mron", msg);
+                                  reported = 1;
+                              } else if (t->type == TOKEN_IDENT && !is_keyword(t->value)) {
+                                  expect_key = 0;
+                              } else if (t->type == TOKEN_IDENT) {
+                                  expect_key = 1; /* keyword value, still expect key next */
+                              } else {
+                                  expect_key = 1;
+                              }
+                          } else {
+                              expect_key = 1;
+                          }
+                      }
+                      if (!reported) {
+                          emit_diag(&j, 0, 0, 0, 1, 1, "mron", "parse error");
+                      }
                   }
               }
-              lsp_free_csv_blocks(csv_blocks, csv_count);
+
           }
 
           /* Schema validation */
           if (doc->ast && schema_ast) {
-              /* Use ast_validate_schema, capturing output */
               int violations = ast_validate_schema(doc->ast, schema_ast, NULL);
               if (violations > 0) {
-                  lj_object_start(&j);
-                  lj_key(&j, "range"); lj_range(&j, 0, 0, 0, 1);
-                  lj_key(&j, "severity"); lj_int(&j, 2); /* Warning */
-                  lj_key(&j, "source"); lj_string(&j, "mron-schema");
                   char msg[128];
                   snprintf(msg, sizeof(msg), "%d schema violation(s)", violations);
-                  lj_key(&j, "message"); lj_string(&j, msg);
-                  lj_object_end(&j);
+                  emit_diag(&j, 0, 0, 0, 1, 2, "mron-schema", msg);
               }
           }
       }
