@@ -1,2 +1,3 @@
 **/*.exe
 **/*.o
+node_modules/

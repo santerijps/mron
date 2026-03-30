@@ -17,11 +17,22 @@ function findServer(context) {
     if (explicit) return explicit;
 
     const ext = process.platform === "win32" ? ".exe" : "";
+    const fs = require("fs");
+
+    // Check inside the extension directory itself
+    const inside = path.join(context.extensionPath, "mron-lsp" + ext);
+    try { fs.accessSync(inside, fs.constants.X_OK); return inside; } catch (_) { }
+
+    // Check next to the extension directory
     const adjacent = path.join(context.extensionPath, "..", "mron-lsp" + ext);
-    try {
-        require("fs").accessSync(adjacent, require("fs").constants.X_OK);
-        return adjacent;
-    } catch (_) { /* not found */ }
+    try { fs.accessSync(adjacent, fs.constants.X_OK); return adjacent; } catch (_) { }
+
+    // Check workspace root
+    const folders = workspace.workspaceFolders;
+    if (folders) {
+        const ws = path.join(folders[0].uri.fsPath, "mron-lsp" + ext);
+        try { fs.accessSync(ws, fs.constants.X_OK); return ws; } catch (_) { }
+    }
 
     return "mron-lsp" + ext;
 }
