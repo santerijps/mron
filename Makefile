@@ -28,7 +28,7 @@ $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 release: clean
-	$(MAKE) CFLAGS="-O3 -flto -DNDEBUG -s -Wall -Wextra -Wpedantic -std=c99 -Isrc -DMRON_VERSION='\"$(MRON_VERSION)\"'" LDFLAGS="-O3 -flto -s"
+	$(MAKE) CFLAGS="-O3 -flto=auto -DNDEBUG -s -Wall -Wextra -Wpedantic -std=c99 -Isrc -DMRON_VERSION='\"$(MRON_VERSION)\"'" LDFLAGS="-O3 -flto=auto -s"
 
 clean:
 ifeq ($(OS),Windows_NT)
